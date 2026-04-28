@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { requestJson, withServer } = require('../helpers/http');
 const { loadFresh } = require('../helpers/module-loader');
 
-function loadApp({ deviceService, ingestService } = {}) {
+function loadApp({ deviceService, ingestService, systemService } = {}) {
     return loadFresh('src/app.js', {
         mocks: {
             'src/services/devices.service.js': deviceService || {
@@ -28,19 +28,29 @@ function loadApp({ deviceService, ingestService } = {}) {
                 },
                 replaceAlertRules: async () => {
                     throw new Error('replaceAlertRules stub not configured');
+                },
+                recordDeviceHeartbeat: async () => {
+                    throw new Error('recordDeviceHeartbeat stub not configured');
                 }
             },
             'src/services/ingest.service.js': ingestService || {
                 ingestBatch: async () => {
                     throw new Error('ingestBatch stub not configured');
                 }
+            },
+            'src/services/system.service.js': systemService || {
+                getSystemHealth: async () => {
+                    throw new Error('getSystemHealth stub not configured');
+                }
             }
         },
         clear: [
             'src/routes/devices.routes.js',
             'src/routes/ingest.routes.js',
+            'src/routes/system.routes.js',
             'src/controllers/devices.controller.js',
-            'src/controllers/ingest.controller.js'
+            'src/controllers/ingest.controller.js',
+            'src/controllers/system.controller.js'
         ]
     });
 }
@@ -749,4 +759,208 @@ test('POST /ingest/batch uses the app error handler for service errors', async (
     } finally {
         console.error = originalConsoleError;
     }
+});
+
+test('GET /devices/:deviceId/latest returns a 404 from the app error handler when the device is unknown', async () => {
+    const app = loadApp({
+        deviceService: {
+            getLatestDeviceSummary: async () => {
+                const error = new Error('Unknown deviceId: pi-missing');
+                error.status = 404;
+                throw error;
+            }
+        }
+    });
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+        await withServer(app, async (baseUrl) => {
+            const response = await requestJson(baseUrl, '/devices/pi-missing/latest');
+
+            assert.equal(response.status, 404);
+            assert.deepEqual(response.body, {
+                error: 'Unknown deviceId: pi-missing'
+            });
+        });
+    } finally {
+        console.error = originalConsoleError;
+    }
+});
+
+test('GET /devices/:deviceId/alerts forwards the requested status filter to the service', async () => {
+    const calls = [];
+    const app = loadApp({
+        deviceService: {
+            getDeviceAlerts: async (payload) => {
+                calls.push(payload);
+                return [];
+            }
+        }
+    });
+
+    await withServer(app, async (baseUrl) => {
+        const response = await requestJson(baseUrl, '/devices/pi-001/alerts?status=active');
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(response.body, {
+            deviceId: 'pi-001',
+            filters: {
+                status: 'active'
+            },
+            alerts: []
+        });
+    });
+
+    assert.deepEqual(calls, [{
+        deviceId: 'pi-001',
+        status: 'active'
+    }]);
+});
+
+test('POST /devices/:deviceId/heartbeat returns the refreshed device payload', async () => {
+    const app = loadApp({
+        deviceService: {
+            recordDeviceHeartbeat: async (deviceId) => ({
+                id: 9,
+                device_id: deviceId,
+                location_label: 'Engineering Lab',
+                status: 'online',
+                registered_at: '2026-04-23T12:00:00.000Z',
+                last_seen_at: '2026-04-28T15:10:00.000Z'
+            })
+        }
+    });
+
+    await withServer(app, async (baseUrl) => {
+        const response = await requestJson(baseUrl, '/devices/pi-001/heartbeat', {
+            method: 'POST'
+        });
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(response.body, {
+            message: 'Heartbeat recorded successfully',
+            device: {
+                id: 9,
+                deviceId: 'pi-001',
+                locationLabel: 'Engineering Lab',
+                status: 'online',
+                registeredAt: '2026-04-23T12:00:00.000Z',
+                lastSeenAt: '2026-04-28T15:10:00.000Z'
+            }
+        });
+    });
+});
+
+test('POST /devices/:deviceId/heartbeat returns a 404 when the device does not exist', async () => {
+    const app = loadApp({
+        deviceService: {
+            recordDeviceHeartbeat: async () => {
+                const error = new Error('Unknown deviceId: pi-missing');
+                error.status = 404;
+                throw error;
+            }
+        }
+    });
+    const originalConsoleError = console.error;
+    console.error = () => {};
+
+    try {
+        await withServer(app, async (baseUrl) => {
+            const response = await requestJson(baseUrl, '/devices/pi-missing/heartbeat', {
+                method: 'POST'
+            });
+
+            assert.equal(response.status, 404);
+            assert.deepEqual(response.body, {
+                error: 'Unknown deviceId: pi-missing'
+            });
+        });
+    } finally {
+        console.error = originalConsoleError;
+    }
+});
+
+test('GET /system/health returns API and database readiness details', async () => {
+    const app = loadApp({
+        systemService: {
+            getSystemHealth: async () => ({
+                httpStatus: 200,
+                body: {
+                    status: 'ok',
+                    checkedAt: '2026-04-28T16:00:00.000Z',
+                    api: {
+                        status: 'ok'
+                    },
+                    database: {
+                        status: 'ok',
+                        connected: true,
+                        name: 'piaq',
+                        serverTime: '2026-04-28T16:00:00.000Z'
+                    }
+                }
+            })
+        }
+    });
+
+    await withServer(app, async (baseUrl) => {
+        const response = await requestJson(baseUrl, '/system/health');
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(response.body, {
+            status: 'ok',
+            checkedAt: '2026-04-28T16:00:00.000Z',
+            api: {
+                status: 'ok'
+            },
+            database: {
+                status: 'ok',
+                connected: true,
+                name: 'piaq',
+                serverTime: '2026-04-28T16:00:00.000Z'
+            }
+        });
+    });
+});
+
+test('GET /system/health returns a non-200 status when the database is unavailable', async () => {
+    const app = loadApp({
+        systemService: {
+            getSystemHealth: async () => ({
+                httpStatus: 503,
+                body: {
+                    status: 'degraded',
+                    checkedAt: '2026-04-28T16:01:00.000Z',
+                    api: {
+                        status: 'ok'
+                    },
+                    database: {
+                        status: 'down',
+                        connected: false,
+                        name: 'piaq',
+                        error: 'connect ECONNREFUSED'
+                    }
+                }
+            })
+        }
+    });
+
+    await withServer(app, async (baseUrl) => {
+        const response = await requestJson(baseUrl, '/system/health');
+
+        assert.equal(response.status, 503);
+        assert.deepEqual(response.body, {
+            status: 'degraded',
+            checkedAt: '2026-04-28T16:01:00.000Z',
+            api: {
+                status: 'ok'
+            },
+            database: {
+                status: 'down',
+                connected: false,
+                name: 'piaq',
+                error: 'connect ECONNREFUSED'
+            }
+        });
+    });
 });

@@ -397,3 +397,41 @@ test('replaceAlertRules forwards the payload and returns the saved rules', async
         ]
     });
 });
+
+test('recordDeviceHeartbeat returns the refreshed mapped device payload', async () => {
+    const controller = loadFresh('src/controllers/devices.controller.js', {
+        mocks: {
+            'src/services/devices.service.js': {
+                recordDeviceHeartbeat: async (deviceId) => ({
+                    id: 14,
+                    device_id: deviceId,
+                    location_label: 'Lab South',
+                    status: 'online',
+                    registered_at: '2026-04-23T12:00:00.000Z',
+                    last_seen_at: '2026-04-28T15:12:00.000Z'
+                })
+            }
+        }
+    });
+
+    const res = createResponse();
+
+    await controller.recordDeviceHeartbeat(
+        { params: { deviceId: 'pi-001' } },
+        res,
+        assert.fail
+    );
+
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, {
+        message: 'Heartbeat recorded successfully',
+        device: {
+            id: 14,
+            deviceId: 'pi-001',
+            locationLabel: 'Lab South',
+            status: 'online',
+            registeredAt: '2026-04-23T12:00:00.000Z',
+            lastSeenAt: '2026-04-28T15:12:00.000Z'
+        }
+    });
+});

@@ -419,3 +419,62 @@ test('replaceAlertRules replaces a device rule set inside a transaction', async 
     assert.equal(calls[0].query, 'BEGIN');
     assert.equal(calls.at(-1).query, 'COMMIT');
 });
+
+test('recordDeviceHeartbeat updates last_seen_at and keeps the device online', async () => {
+    const calls = [];
+    const service = loadFresh('src/services/devices.service.js', {
+        mocks: {
+            'src/config/db.js': {
+                query: async (query, values) => {
+                    calls.push({ query, values });
+
+                    if (/UPDATE devices/i.test(query)) {
+                        return {
+                            rows: [{
+                                id: 12,
+                                device_id: 'pi-001',
+                                location_label: 'Engineering Lab',
+                                status: 'online',
+                                registered_at: '2026-04-23T12:00:00.000Z',
+                                last_seen_at: '2026-04-28T15:12:00.000Z'
+                            }]
+                        };
+                    }
+
+                    throw new Error(`Unexpected query: ${query}`);
+                }
+            }
+        }
+    });
+
+    const result = await service.recordDeviceHeartbeat('pi-001');
+
+    assert.deepEqual(result, {
+        id: 12,
+        device_id: 'pi-001',
+        location_label: 'Engineering Lab',
+        status: 'online',
+        registered_at: '2026-04-23T12:00:00.000Z',
+        last_seen_at: '2026-04-28T15:12:00.000Z'
+    });
+    assert.deepEqual(calls[0].values, ['pi-001']);
+});
+
+test('recordDeviceHeartbeat throws a 404 when the device is unknown', async () => {
+    const service = loadFresh('src/services/devices.service.js', {
+        mocks: {
+            'src/config/db.js': {
+                query: async () => ({ rows: [] })
+            }
+        }
+    });
+
+    await assert.rejects(
+        service.recordDeviceHeartbeat('pi-missing'),
+        (error) => {
+            assert.equal(error.message, 'Unknown deviceId: pi-missing');
+            assert.equal(error.status, 404);
+            return true;
+        }
+    );
+});
