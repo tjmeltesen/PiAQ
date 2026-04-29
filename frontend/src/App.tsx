@@ -50,8 +50,6 @@ export default function App() {
     humidity: 0,
   });
 
-  const mountedRef = useRef(true);
-
   const currentData = useMemo(() => data[data.length - 1], [data]);
   const hasData = !!currentData;
   const displayCurrentData = currentData || placeholderRef.current;
