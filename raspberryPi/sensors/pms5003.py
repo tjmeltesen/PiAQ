@@ -5,6 +5,7 @@ class PMS5003Sensor:
     def __init__(self, port="/dev/serial0", baudrate=9600):
         uart = serial.Serial(port, baudrate, timeout=1.5)
         self.sensor = PM25_UART(uart, reset_pin=None)
+        self.sensor.active_mode()
 
     def read(self):
         try:
