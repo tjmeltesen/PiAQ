@@ -11,7 +11,8 @@ class PMS5003Sensor:
             data = self.sensor.read()
             if not data:
                 return None
-
+                
+            print(f"FULL SENSOR DATA: {data}")
             return {
                 "pm1_0": data["pm10 env"],
                 "pm2_5": data["pm25 env"],
