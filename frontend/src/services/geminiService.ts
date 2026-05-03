@@ -1,11 +1,12 @@
-import { GoogleGenAI } from "@google/genai";
 import { AirQualityData, Insight } from "../types";
 import { sessionCacheFetch } from "./sessionCache";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_MODEL = "gpt-4.1-nano";
+const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
 const REFRESH_MS = 5 * 60 * 1000;
-const CACHE_PREFIX = "piaq:gemini:airQualityInsights:v1:";
+const CACHE_PREFIX = "piaq:openai:airQualityInsights:v1:";
 
 const getTimeBucket = (timestamp: string): string => {
   const ms = Date.parse(timestamp);
@@ -31,14 +32,23 @@ const buildPrompt = (currentData: AirQualityData) => `
   - Humidity: ${currentData.humidity}%
   - Temperature: ${currentData.temp}°C
   
-  Return the response as a JSON array of objects with the following structure:
+  Return the response as valid JSON with this shape:
   {
-    "id": "unique-id",
-    "type": "health" | "action" | "alert",
-    "message": "the insight message",
-    "severity": "low" | "medium" | "high"
+    "insights": [
+      {
+        "id": "unique-id",
+        "type": "health" | "action" | "alert",
+        "message": "the insight message",
+        "severity": "low" | "medium" | "high"
+      }
+    ]
   }
 `;
+
+const parseInsights = (text: string): Insight[] => {
+  const parsed = JSON.parse(text) as { insights?: Insight[] };
+  return Array.isArray(parsed.insights) ? parsed.insights : [];
+};
 
 export const getAirQualityInsights = async (
   currentData: AirQualityData,
@@ -50,17 +60,43 @@ export const getAirQualityInsights = async (
     cacheKey,
     REFRESH_MS,
     async () => {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: buildPrompt(currentData),
-        config: {
-          responseMimeType: "application/json",
+      if (!OPENAI_API_KEY) {
+        throw new Error("Missing OpenAI API key.");
+      }
+
+      const response = await fetch(OPENAI_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
         },
+        body: JSON.stringify({
+          model: OPENAI_MODEL,
+          messages: [
+            {
+              role: "system",
+              content: "You analyze indoor air quality data and return concise, practical recommendations as JSON.",
+            },
+            {
+              role: "user",
+              content: buildPrompt(currentData),
+            },
+          ],
+          temperature: 0.4,
+          response_format: { type: "json_object" },
+        }),
       });
 
-      const text = response.text;
+      if (!response.ok) {
+        throw new Error(`OpenAI request failed with status ${response.status}.`);
+      }
+
+      const data = (await response.json()) as {
+        choices?: Array<{ message?: { content?: string | null } }>;
+      };
+      const text = data.choices?.[0]?.message?.content;
       if (!text) return [];
-      return JSON.parse(text) as Insight[];
+      return parseInsights(text);
     },
     opts
   ).catch((error) => {

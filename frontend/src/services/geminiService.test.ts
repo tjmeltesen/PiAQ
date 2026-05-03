@@ -1,17 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionCacheClearAll } from './sessionCache';
 
-const { generateContentMock } = vi.hoisted(() => ({
-  generateContentMock: vi.fn(),
+const { fetchMock } = vi.hoisted(() => ({
+  fetchMock: vi.fn(),
 }));
 
-vi.mock('@google/genai', () => ({
-  GoogleGenAI: vi.fn().mockImplementation(() => ({
-    models: {
-      generateContent: generateContentMock,
-    },
-  })),
-}));
+vi.stubGlobal('fetch', fetchMock);
 
 import { getAirQualityInsights } from './geminiService';
 
@@ -26,35 +20,63 @@ const sampleData = {
   humidity: 45,
 };
 
-describe('geminiService outbound POST-style calls', () => {
+describe('openai insights service outbound POST-style calls', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
     sessionCacheClearAll();
   });
 
-  it('calls Gemini generateContent with expected payload and parses JSON insights', async () => {
-    generateContentMock.mockResolvedValueOnce({
-      text: JSON.stringify([
-        { id: 'i1', type: 'health', message: 'Open windows for ventilation.', severity: 'medium' },
-      ]),
+  it('calls OpenAI with expected payload and parses JSON insights', async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                insights: [
+                  { id: 'i1', type: 'health', message: 'Open windows for ventilation.', severity: 'medium' },
+                ],
+              }),
+            },
+          },
+        ],
+      }),
     });
 
     const insights = await getAirQualityInsights(sampleData, { forceRefresh: true });
 
-    expect(generateContentMock).toHaveBeenCalledTimes(1);
-    const call = generateContentMock.mock.calls[0][0];
-    expect(call.model).toBe('gemini-3-flash-preview');
-    expect(call.config).toEqual({ responseMimeType: 'application/json' });
-    expect(call.contents).toContain('AQI: 72');
-    expect(call.contents).toContain('PM2.5: 18');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, request] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.openai.com/v1/chat/completions');
+    expect(request.method).toBe('POST');
+    expect(request.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      Authorization: expect.stringContaining('Bearer '),
+    });
+
+    const body = JSON.parse(request.body as string) as {
+      model: string;
+      messages: Array<{ role: string; content: string }>;
+      response_format: { type: string };
+    };
+    expect(body.model).toBe('gpt-4.1-nano');
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.messages[1].content).toContain('AQI: 72');
+    expect(body.messages[1].content).toContain('PM2.5: 18');
     expect(insights).toEqual([
       { id: 'i1', type: 'health', message: 'Open windows for ventilation.', severity: 'medium' },
     ]);
   });
 
   it('returns empty list when provider returns no text body', async () => {
-    generateContentMock.mockResolvedValueOnce({ text: '' });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValueOnce({ choices: [{ message: { content: '' } }] }),
+    });
 
     const insights = await getAirQualityInsights(
       { ...sampleData, timestamp: '2026-02-01T00:06:00.000Z' },
@@ -65,8 +87,20 @@ describe('geminiService outbound POST-style calls', () => {
   });
 
   it('reuses cached result for same 5-minute bucket unless forceRefresh is set', async () => {
-    generateContentMock.mockResolvedValue({
-      text: JSON.stringify([{ id: 'c1', type: 'action', message: 'Keep filters clean.', severity: 'low' }]),
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                insights: [{ id: 'c1', type: 'action', message: 'Keep filters clean.', severity: 'low' }],
+              }),
+            },
+          },
+        ],
+      }),
     });
 
     const first = await getAirQualityInsights(
@@ -83,11 +117,11 @@ describe('geminiService outbound POST-style calls', () => {
     );
 
     expect(first).toEqual(second);
-    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('returns fallback insight when Gemini request fails', async () => {
-    generateContentMock.mockRejectedValueOnce(new Error('network failed'));
+  it('returns fallback insight when OpenAI request fails', async () => {
+    fetchMock.mockRejectedValueOnce(new Error('network failed'));
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const insights = await getAirQualityInsights(
@@ -108,7 +142,13 @@ describe('geminiService outbound POST-style calls', () => {
   });
 
   it('returns fallback insight when provider returns invalid JSON', async () => {
-    generateContentMock.mockResolvedValueOnce({ text: '{invalid-json' });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValueOnce({
+        choices: [{ message: { content: '{invalid-json' } }],
+      }),
+    });
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const insights = await getAirQualityInsights(
@@ -124,8 +164,20 @@ describe('geminiService outbound POST-style calls', () => {
   });
 
   it('calls provider again for a different 5-minute time bucket', async () => {
-    generateContentMock.mockResolvedValue({
-      text: JSON.stringify([{ id: 't1', type: 'health', message: 'Track trends', severity: 'low' }]),
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                insights: [{ id: 't1', type: 'health', message: 'Track trends', severity: 'low' }],
+              }),
+            },
+          },
+        ],
+      }),
     });
 
     await getAirQualityInsights(
@@ -137,6 +189,6 @@ describe('geminiService outbound POST-style calls', () => {
       { forceRefresh: false }
     );
 
-    expect(generateContentMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
