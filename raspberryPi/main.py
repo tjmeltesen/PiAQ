@@ -99,6 +99,8 @@ def main():
     last_upload_time = time.time()
     last_heartbeat_time = last_upload_time
 
+    failedBeats = 0
+
     while True:
         try:
             # 1. Collect a single sample
@@ -183,8 +185,13 @@ def main():
                 if uploader.send_heartbeat(DEVICE_ID):
                     logger.info(f"Heartbeat sent for {DEVICE_ID}.")
                     last_heartbeat_time = current_time
+                    failedBeats = 0
                 else:
                     logger.warning("Heartbeat failed; will retry on the next interval.")
+                    failedBeats++
+                    if failedBeats > 2:
+                        isRegistered = false
+                    
 
         except Exception as e:
             logger.exception(f"Unexpected error in main loop: {e}")
