@@ -83,7 +83,7 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   return (await res.json()) as T;
 };
 
-const sendJson = async <T>(path: string, method: 'POST' | 'PUT', body?: unknown): Promise<T> => {
+const sendJson = async <T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown): Promise<T> => {
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
@@ -105,6 +105,9 @@ const sendJson = async <T>(path: string, method: 'POST' | 'PUT', body?: unknown)
 
   return (await res.json()) as T;
 };
+
+export const deleteDevice = async (deviceId: string): Promise<{ message: string }> =>
+  sendJson<{ message: string }>(`/devices/${encodeURIComponent(deviceId)}`, 'DELETE');
 
 // PM2.5 -> AQI (US EPA breakpoints). Enough for display-level accuracy.
 const aqiFromPm25 = (pm25: number): number => {

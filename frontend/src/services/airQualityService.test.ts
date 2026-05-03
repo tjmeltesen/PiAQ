@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getDeviceAlerts, getDeviceHistoryWindow, getDeviceLatestSummary, type TimeWindow } from './airQualityService';
+import { deleteDevice, getDeviceAlerts, getDeviceHistoryWindow, getDeviceLatestSummary, type TimeWindow } from './airQualityService';
 import { sessionCacheClearAll } from './sessionCache';
 
 const mkFetchResponse = (body: unknown, ok = true, status = 200) =>
@@ -121,6 +121,25 @@ describe('airQualityService outbound GETs', () => {
 
     const data = await getDeviceLatestSummary('device-null', { forceRefresh: true });
     expect(data).toBeNull();
+  });
+
+  it('sends DELETE when removing a device', async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      mkFetchResponse({ message: 'Device deleted successfully' })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(deleteDevice('dev/delete')).resolves.toEqual({ message: 'Device deleted successfully' });
+
+    const calledUrl = new URL(fetchMock.mock.calls[0][0] as string, 'http://localhost');
+    expect(calledUrl.pathname).toBe('/devices/dev%2Fdelete');
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      method: 'DELETE',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: undefined,
+    });
   });
 
   it('requests alerts with status filter query params', async () => {

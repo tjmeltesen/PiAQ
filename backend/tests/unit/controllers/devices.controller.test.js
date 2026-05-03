@@ -131,6 +131,45 @@ test('listDevices responds with mapped dashboard devices', async () => {
     });
 });
 
+test('deleteDevice responds with a mapped deleted device payload', async () => {
+    const calls = [];
+    const controller = loadFresh('src/controllers/devices.controller.js', {
+        mocks: {
+            'src/services/devices.service.js': {
+                deleteDevice: async (deviceId) => {
+                    calls.push(deviceId);
+                    return {
+                        id: 9,
+                        device_id: deviceId,
+                        location_label: 'Atrium',
+                        status: 'online',
+                        registered_at: '2026-04-23T12:00:00.000Z',
+                        last_seen_at: '2026-04-23T12:05:00.000Z'
+                    };
+                }
+            }
+        }
+    });
+
+    const res = createResponse();
+
+    await controller.deleteDevice({ params: { deviceId: 'pi-001' } }, res, assert.fail);
+
+    assert.deepEqual(calls, ['pi-001']);
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(res.body, {
+        message: 'Device deleted successfully',
+        device: {
+            id: 9,
+            deviceId: 'pi-001',
+            locationLabel: 'Atrium',
+            status: 'online',
+            registeredAt: '2026-04-23T12:00:00.000Z',
+            lastSeenAt: '2026-04-23T12:05:00.000Z'
+        }
+    });
+});
+
 test('getLatestDeviceSummary responds with the latest summary payload', async () => {
     const controller = loadFresh('src/controllers/devices.controller.js', {
         mocks: {

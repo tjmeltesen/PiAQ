@@ -14,6 +14,9 @@ function loadApp({ deviceService, ingestService, systemService } = {}) {
                 listDevices: async () => {
                     throw new Error('listDevices stub not configured');
                 },
+                deleteDevice: async () => {
+                    throw new Error('deleteDevice stub not configured');
+                },
                 getLatestDeviceSummary: async () => {
                     throw new Error('getLatestDeviceSummary stub not configured');
                 },
@@ -229,6 +232,46 @@ test('GET /devices returns registered devices in the dashboard response shape', 
             ]
         });
     });
+});
+
+test('DELETE /devices/:deviceId deletes a registered device', async () => {
+    const calls = [];
+    const app = loadApp({
+        deviceService: {
+            deleteDevice: async (deviceId) => {
+                calls.push(deviceId);
+                return {
+                    id: 1,
+                    device_id: deviceId,
+                    location_label: 'Atrium',
+                    status: 'online',
+                    registered_at: '2026-04-23T12:00:00.000Z',
+                    last_seen_at: '2026-04-23T12:05:00.000Z'
+                };
+            }
+        }
+    });
+
+    await withServer(app, async (baseUrl) => {
+        const response = await requestJson(baseUrl, '/devices/pi-001', {
+            method: 'DELETE'
+        });
+
+        assert.equal(response.status, 200);
+        assert.deepEqual(response.body, {
+            message: 'Device deleted successfully',
+            device: {
+                id: 1,
+                deviceId: 'pi-001',
+                locationLabel: 'Atrium',
+                status: 'online',
+                registeredAt: '2026-04-23T12:00:00.000Z',
+                lastSeenAt: '2026-04-23T12:05:00.000Z'
+            }
+        });
+    });
+
+    assert.deepEqual(calls, ['pi-001']);
 });
 
 test('GET /devices/:deviceId/latest returns the latest summary window', async () => {

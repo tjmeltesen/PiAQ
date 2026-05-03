@@ -72,6 +72,25 @@ async function listDevices() {
     return result.rows;
 }
 
+async function deleteDevice(deviceId) {
+    const result = await pool.query(
+        `
+        DELETE FROM devices
+        WHERE device_id = $1
+        RETURNING id, device_id, location_label, status, registered_at, last_seen_at
+        `,
+        [deviceId]
+    );
+
+    if (result.rows.length === 0) {
+        const error = new Error(`Unknown deviceId: ${deviceId}`);
+        error.status = 404;
+        throw error;
+    }
+
+    return result.rows[0];
+}
+
 async function recordDeviceHeartbeat(deviceId) {
     const result = await pool.query(
         `
@@ -366,6 +385,7 @@ async function replaceAlertRules({ deviceId, rules }) {
 module.exports = {
     registerDevice,
     listDevices,
+    deleteDevice,
     recordDeviceHeartbeat,
     getLatestDeviceSummary,
     getDeviceHistory,

@@ -12,12 +12,15 @@ import {
   Settings,
   Bell,
   Mail,
-  Send
+  Send,
+  X,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AirQualityData, AlertEmailSettings } from './types';
 import { POLLUTANTS } from './constants';
 import {
+  deleteDevice,
   getAlertEmailSettings,
   getDeviceHistoryWindow,
   getDeviceLatestSummary,
@@ -47,6 +50,11 @@ type UserSettings = {
   timezone: 'local' | 'UTC';
 };
 
+type DeviceOption = {
+  deviceId: string;
+  locationLabel?: string | null;
+};
+
 const SETTINGS_KEY = 'piaq:userSettings:v1';
 
 const DEFAULT_SETTINGS: UserSettings = {
@@ -74,7 +82,7 @@ const loadSettings = (): UserSettings => {
 
 export default function App() {
   const [deviceId, setDeviceId] = useState<string>('');
-  const [devices, setDevices] = useState<Array<{ deviceId: string; locationLabel?: string }>>([]);
+  const [devices, setDevices] = useState<DeviceOption[]>([]);
   const [data, setData] = useState<AirQualityData[]>([]);
   const [latestData, setLatestData] = useState<AirQualityData | null>(null);
   const [averages, setAverages] = useState<Record<string, number | null> | null>(null);
@@ -91,8 +99,11 @@ export default function App() {
   const [alertEmailInput, setAlertEmailInput] = useState('');
   const [alertEmailStatus, setAlertEmailStatus] = useState<string | null>(null);
   const [isAlertEmailBusy, setIsAlertEmailBusy] = useState(false);
+  const [isDeviceMenuOpen, setIsDeviceMenuOpen] = useState(false);
+  const [deletingDeviceId, setDeletingDeviceId] = useState<string | null>(null);
 
   const mountedRef = useRef(true);
+  const deviceMenuRef = useRef<HTMLDivElement | null>(null);
   const placeholderRef = useRef<AirQualityData>({
     timestamp: new Date().toISOString(),
     aqi: 0,
@@ -105,6 +116,12 @@ export default function App() {
   });
 
   const currentData = useMemo(() => latestData ?? data[data.length - 1], [latestData, data]);
+  const selectedDevice = useMemo(
+    () => devices.find((device) => device.deviceId === deviceId) || null,
+    [devices, deviceId]
+  );
+  const formatDeviceLabel = (device: DeviceOption) =>
+    device.locationLabel ? `${device.locationLabel} (${device.deviceId})` : device.deviceId;
   const chartData = useMemo(() => {
     if (!latestData) return data;
     if (data.length === 0) return [latestData];
@@ -251,6 +268,47 @@ export default function App() {
     }
   };
 
+  const handleDeleteDevice = async (deviceToDelete: DeviceOption) => {
+    const label = formatDeviceLabel(deviceToDelete);
+    const confirmed = window.confirm(
+      `Delete ${label}? This removes the device and its stored readings from the database. The physical device will need to register again before it appears here.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingDeviceId(deviceToDelete.deviceId);
+    setLoadError(null);
+
+    try {
+      await deleteDevice(deviceToDelete.deviceId);
+      if (!mountedRef.current) return;
+
+      setDevices((prev) => {
+        const nextDevices = prev.filter((device) => device.deviceId !== deviceToDelete.deviceId);
+
+        if (deviceId === deviceToDelete.deviceId) {
+          const nextSelectedDevice = nextDevices[0]?.deviceId || '';
+          setDeviceId(nextSelectedDevice);
+
+          if (!nextSelectedDevice) {
+            setData([]);
+            setLatestData(null);
+            setAverages(null);
+            setAlertEmailSettings(null);
+            setAlertEmailStatus(null);
+          }
+        }
+
+        return nextDevices;
+      });
+      setIsDeviceMenuOpen(false);
+    } catch (err: any) {
+      if (mountedRef.current) setLoadError(err?.message || 'Failed to delete device');
+    } finally {
+      if (mountedRef.current) setDeletingDeviceId(null);
+    }
+  };
+
   useEffect(() => {
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
@@ -258,6 +316,19 @@ export default function App() {
       // ignore
     }
   }, [settings]);
+
+  useEffect(() => {
+    if (!isDeviceMenuOpen) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!deviceMenuRef.current?.contains(event.target as Node)) {
+        setIsDeviceMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isDeviceMenuOpen]);
 
 
   // Fetch device list on mount
@@ -324,18 +395,64 @@ export default function App() {
       {/* Device Selector Dropdown */}
       <div className="w-full flex justify-center py-4 bg-zinc-950/80 border-b border-zinc-800/50">
         <label className="mr-2 text-sm text-zinc-400">Device:</label>
-        <select
-          className="rounded-lg px-3 py-1 bg-zinc-900 text-zinc-200 border border-zinc-700 focus:outline-none focus:ring focus:border-indigo-500"
-          value={deviceId}
-          onChange={e => setDeviceId(e.target.value)}
-          disabled={!devices.length}
-        >
-          {devices.map((d) => (
-            <option key={d.deviceId} value={d.deviceId}>
-              {d.locationLabel ? `${d.locationLabel} (${d.deviceId})` : d.deviceId}
-            </option>
-          ))}
-        </select>
+        <div ref={deviceMenuRef} className="relative w-72 max-w-[70vw]">
+          <button
+            type="button"
+            aria-label="Select device"
+            aria-expanded={isDeviceMenuOpen}
+            onClick={() => setIsDeviceMenuOpen((open) => !open)}
+            disabled={!devices.length}
+            className="flex w-full items-center justify-between gap-2 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1 text-left text-zinc-200 transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="min-w-0 truncate text-sm">
+              {selectedDevice ? formatDeviceLabel(selectedDevice) : 'No registered devices'}
+            </span>
+            <ChevronDown className="h-4 w-4 flex-shrink-0 text-zinc-500" />
+          </button>
+
+          {isDeviceMenuOpen && (
+            <div className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-[70] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl shadow-black/40">
+              {devices.map((device) => {
+                const isSelected = device.deviceId === deviceId;
+                const isDeleting = deletingDeviceId === device.deviceId;
+
+                return (
+                  <div
+                    key={device.deviceId}
+                    className={cn(
+                      "flex items-center gap-2 px-2 py-1",
+                      isSelected ? "bg-indigo-600/20" : "hover:bg-zinc-900"
+                    )}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeviceId(device.deviceId);
+                        setIsDeviceMenuOpen(false);
+                      }}
+                      className="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm text-zinc-200"
+                    >
+                      {formatDeviceLabel(device)}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${formatDeviceLabel(device)}`}
+                      title={`Delete ${formatDeviceLabel(device)}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDeleteDevice(device);
+                      }}
+                      disabled={!!deletingDeviceId}
+                      className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-rose-500/10 hover:text-rose-300 disabled:cursor-wait disabled:opacity-50"
+                    >
+                      <X className={cn("h-4 w-4", isDeleting && "animate-pulse")} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
       {/* Sidebar Navigation */}
       <aside className="fixed left-0 top-0 bottom-0 w-20 border-r border-zinc-800/50 bg-zinc-950/50 backdrop-blur-xl z-50 flex flex-col items-center py-8 gap-8">

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 
 vi.mock('./services/airQualityService', () => ({
+  deleteDevice: vi.fn(),
   getAlertEmailSettings: vi.fn(),
   getDeviceHistoryWindow: vi.fn(),
   getDeviceLatestSummary: vi.fn(),
@@ -19,7 +20,7 @@ vi.mock('./components/AlertsBanner', () => ({
   AlertsBanner: () => <div>Alerts Banner</div>,
 }));
 
-import { getAlertEmailSettings, getDeviceHistoryWindow, getDeviceLatestSummary } from './services/airQualityService';
+import { deleteDevice, getAlertEmailSettings, getDeviceHistoryWindow, getDeviceLatestSummary } from './services/airQualityService';
 
 const historyRows = [
   {
@@ -84,6 +85,8 @@ describe('App UI', () => {
       repeatIntervalMinutes: 20,
       emailDeliveryConfigured: true,
     });
+
+    vi.mocked(deleteDevice).mockResolvedValue({ message: 'Device deleted successfully' });
   });
 
   afterEach(() => {
@@ -114,6 +117,26 @@ describe('App UI', () => {
       expect(vi.mocked(getDeviceHistoryWindow)).toHaveBeenCalledWith('device-1', '1d', undefined);
       expect(vi.mocked(getDeviceLatestSummary)).toHaveBeenCalledWith('device-1', undefined);
     });
+  });
+
+  it('deletes a device from the top device menu after confirmation', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    try {
+      render(<App />);
+      await screen.findByText('Lab (device-1)');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Select device' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Delete Lab (device-1)' }));
+
+      await waitFor(() => {
+        expect(vi.mocked(deleteDevice)).toHaveBeenCalledWith('device-1');
+      });
+      expect(screen.getByText('No registered devices')).toBeInTheDocument();
+      expect(confirmSpy).toHaveBeenCalled();
+    } finally {
+      confirmSpy.mockRestore();
+    }
   });
 
   it('applies settings changes and persists to localStorage', async () => {

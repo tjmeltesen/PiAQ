@@ -82,6 +82,56 @@ test('listDevices returns rows in stable dashboard order', async () => {
     assert.equal(capturedCalls[0].values, undefined);
 });
 
+test('deleteDevice removes a device by public deviceId and returns the deleted row', async () => {
+    const calls = [];
+    const deletedRow = {
+        id: 9,
+        device_id: 'pi-001',
+        location_label: 'Engineering Lab',
+        status: 'online',
+        registered_at: '2026-04-23T12:00:00.000Z',
+        last_seen_at: '2026-04-28T15:12:00.000Z'
+    };
+
+    const service = loadFresh('src/services/devices.service.js', {
+        mocks: {
+            'src/config/db.js': {
+                query: async (query, values) => {
+                    calls.push({ query, values });
+                    return { rows: [deletedRow] };
+                }
+            }
+        }
+    });
+
+    const result = await service.deleteDevice('pi-001');
+
+    assert.deepEqual(result, deletedRow);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0].query, /DELETE FROM devices/i);
+    assert.match(calls[0].query, /WHERE device_id = \$1/i);
+    assert.deepEqual(calls[0].values, ['pi-001']);
+});
+
+test('deleteDevice throws a 404 when the device is unknown', async () => {
+    const service = loadFresh('src/services/devices.service.js', {
+        mocks: {
+            'src/config/db.js': {
+                query: async () => ({ rows: [] })
+            }
+        }
+    });
+
+    await assert.rejects(
+        service.deleteDevice('pi-missing'),
+        (error) => {
+            assert.equal(error.message, 'Unknown deviceId: pi-missing');
+            assert.equal(error.status, 404);
+            return true;
+        }
+    );
+});
+
 test('getLatestDeviceSummary returns the most recent reading for a known device', async () => {
     const capturedCalls = [];
     const latestRow = {

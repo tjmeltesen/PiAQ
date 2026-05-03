@@ -68,6 +68,20 @@ async function listDevices(req, res, next) {
     }
 }
 
+async function deleteDevice(req, res, next) {
+    try {
+        const { deviceId } = req.params;
+        const device = await devicesService.deleteDevice(deviceId);
+
+        res.status(200).json({
+            message: 'Device deleted successfully',
+            device: mapDevice(device)
+        });
+    } catch (err) {
+        next(err);
+    }
+}
+
 async function getLatestDeviceSummary(req, res, next) {
     try {
         const { deviceId } = req.params;
@@ -218,6 +232,7 @@ async function recordDeviceHeartbeat(req, res, next) {
 module.exports = {
     registerDevice,
     listDevices,
+    deleteDevice,
     getLatestDeviceSummary,
     getDeviceHistory,
     getDeviceAlerts,

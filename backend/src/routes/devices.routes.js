@@ -34,6 +34,18 @@ router.post(
 
 router.get('/', devicesController.listDevices);
 
+router.delete(
+    '/:deviceId',
+    [
+        param('deviceId')
+            .trim()
+            .notEmpty()
+            .withMessage('deviceId is required')
+    ],
+    validateRequest,
+    devicesController.deleteDevice
+);
+
 router.post(
     '/:deviceId/heartbeat',
     [
