@@ -1,0 +1,6 @@
+name = "piaq-openai-proxy"
+main = "src/index.js"
+compatibility_date = "2026-05-04"
+
+[vars]
+ALLOWED_ORIGIN = "https://piaq.pages.dev"

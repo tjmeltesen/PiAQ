@@ -44,7 +44,7 @@ The backend stores registered devices, sensor readings, alert rules, alert histo
 - Email confirmation before alerts can be sent to a recipient.
 - User-configurable repeat interval for alert emails while a sensor remains above threshold.
 - Test alert email flow for demos and validation.
-- Optional AI insights panel in the frontend when Gemini is configured.
+- Optional AI insights panel in the frontend when an OpenAI-compatible proxy is configured.
 
 ## Deployed App
 
@@ -79,7 +79,7 @@ That keeps the alert workflow demoable without requiring a verified production e
 - Python 3 on the Raspberry Pi.
 - Raspberry Pi hardware with the supported sensors connected.
 - A Resend API key if testing email alerts.
-- A Gemini API key if using AI insights.
+- An OpenAI API key if using AI insights.
 
 ### Backend
 
@@ -120,11 +120,11 @@ Invoke-RestMethod http://localhost:5000/devices
 
 ### Frontend
 
-Set `frontend/.env` to point at the backend:
+Set `frontend/.env` to point at the backend and AI proxy:
 
 ```env
 VITE_API_URL=http://localhost:5000
-GEMINI_API_KEY=your_gemini_key_if_using_ai
+VITE_OPENAI_API_URL=https://piaq-openai-proxy.<account>.workers.dev/v1/chat/completions
 ```
 
 Then run:
@@ -140,6 +140,21 @@ Open the Vite URL, usually:
 ```text
 http://localhost:3001
 ```
+
+### Cloudflare Worker (OpenAI proxy)
+
+The frontend cannot call OpenAI directly because of browser CORS, so a Worker proxy is required.
+
+```powershell
+cd cloudflare-worker
+npm install -g wrangler
+wrangler login
+wrangler secret put OPENAI_API_KEY
+wrangler deploy
+```
+
+Update `cloudflare-worker/wrangler.toml` if you need to change `ALLOWED_ORIGIN`, then deploy.
+After deploy, set `VITE_OPENAI_API_URL` to the Worker URL (shown in the deploy output).
 
 ### Raspberry Pi Collector
 
@@ -226,7 +241,7 @@ Frontend:
 - Recharts for charting.
 - lucide-react for icons.
 - date-fns for date handling.
-- Gemini SDK for optional AI insights.
+- OpenAI (via Worker proxy) for optional AI insights.
 - Vitest and Testing Library for tests.
 
 Raspberry Pi:
@@ -239,7 +254,7 @@ External services:
 
 - PostgreSQL for cloud/server-backed storage.
 - Resend for email alert delivery.
-- Gemini for optional insight generation.
+- OpenAI (via Cloudflare Worker proxy) for optional insight generation.
 
 ## Testing
 
